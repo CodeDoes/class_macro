@@ -87,7 +87,7 @@ proc generateConstructor(
       head:NimNode,
       constr:NimNode,
       init:NimNode]=
-  # hint astGenRepr InitProc
+  # dev_hint astGenRepr InitProc
   var T = InitProc.params[1].identdefs_type
   T.expectKind {nnkIdent}
   InitProc.expectKind nnkProcDef
@@ -124,7 +124,7 @@ proc generateConstructor(
     constr: Constr,
     init: InitProc
   )
-  # hint repr result
+  # dev_hint repr result
 macro gen_constructor*(stmt_list:untyped):untyped=
   var InitProc = stmt_list
   stmt_list.expectKind {nnkStmtList, nnkProcDef}
@@ -143,12 +143,12 @@ macro gen_constructor*(stmt_list:untyped):untyped=
       )
     )
   result = newStmtList(t.head,t.constr,t.init)
-proc processClassHeader(header:NimNode
-):tuple[name,root:NimNode,exported:bool]=
+proc processClassHeader(header:NimNode):tuple[name,root:NimNode,exported:bool]=
   var 
     name=header
     root="RootObj".ident
     exported=false
+  
   if header.kind == nnkInfix:
     if $header[0]=="*":
       assert $header[2][0]=="of"
@@ -188,6 +188,11 @@ var constructor_regs {.compileTime.} = newTable[
     constrs: seq[tuple[
       head, constr, init: NimNode]]]
 ]()
+macro dev_hint(a:untyped):untyped=
+  when isMainModule:
+    return newCall("hint".ident, a)
+  else:
+    return newEmptyNode()
 
 proc getInheritedReclist(key:string):NimNode=
   var base = constructor_regs[key]
@@ -215,17 +220,25 @@ proc sharesNames(n,b:NimNode):bool=
       var kb = b[bi]
       if ka==kb: return true
   return false
-proc class_def(header:NimNode,content:NimNode):auto=
-  hint astGenRepr header
-  hint astGenRepr content
+
+type 
+  TypeDefResult = tuple[
+    typesection,
+    basenew,
+    pre,
+    main:NimNode]
+  TypeSectionResult = seq[TypeDefResult]
+proc class_def(header:NimNode,content:NimNode):TypeDefResult=
+  dev_hint astGenRepr header
+  dev_hint astGenRepr content
   #NOTE postfix export designation `*` doesn't work yet
   var
     Name,Root:NimNode
     exported:bool
   # echo repr processClassHeader(header)
   (Name,Root,exported) = processClassHeader(header)
-  # hint astGenRepr Name
-  # hint astGenRepr Root
+  # dev_hint astGenRepr Name
+  # dev_hint astGenRepr Root
   
   var
     Main            = newStmtList()
@@ -278,11 +291,11 @@ proc class_def(header:NimNode,content:NimNode):auto=
       Main.add gen.init
       Constrs.add (head: gen.head, constr: gen.constr, init: gen.init)
 
-  # hint astGenRepr Root.base()#.getTypeImpl()
+  # dev_hint astGenRepr Root.base()#.getTypeImpl()
   # BaseConstructor.add(newColonExpr(n.identdefs_name,n.identdefs_default))
   # BaseNew.addPragma("inject".ident)
   proc NewVar(n:NimNode)=
-    # hint astGenRepr n
+    # dev_hint astGenRepr n
     var v = n.copy()
     v.expectKind nnkIdentDefs
     v.expectMinLen 3
@@ -294,9 +307,9 @@ proc class_def(header:NimNode,content:NimNode):auto=
       #Check if in inherited constructor:
       for i in 1 ..< BaseConstructor.len:
         var c = BaseConstructor[i]
-        hint astGenRepr c[0]
-        hint astGenRepr v.identdefs_name
-        hint $($c[0] == $v.identdefs_name)
+        dev_hint astGenRepr c[0]
+        dev_hint astGenRepr v.identdefs_name
+        dev_hint $($c[0] == $v.identdefs_name)
         if $c[0] == $v.identdefs_name:
           v.expectLen 3
           # Is already in inherited base constructor, overwrite
@@ -329,7 +342,7 @@ proc class_def(header:NimNode,content:NimNode):auto=
       n.params.del(1)
     n.params.insert(1, newIdentDefs(This.ident, Name))
   proc NewThisPragma(n:NimNode)=
-    # hint astGenRepr n 
+    # dev_hint astGenRepr n 
     n.expectLen(1)
     n[0].expectKind(nnkExprColonExpr)
     if not($n[0][0] == "this"):
@@ -362,7 +375,7 @@ proc class_def(header:NimNode,content:NimNode):auto=
     case n.kind
     of nnkInfix:
       n.expectLen 3
-      hint astGenRepr n
+      dev_hint astGenRepr n
       case $n[0]
       of "*=":
         NewVar newIdentDefs(n[1],newEmptyNode(),n[2])
@@ -393,13 +406,14 @@ proc class_def(header:NimNode,content:NimNode):auto=
     of nnkDiscardStmt: # Valid
       Main.add nnkDiscardStmt.newTree(newEmptyNode())
     else:
-      hint astGenRepr n
+      dev_hint astGenRepr n
       error("invalid class body node " & $n.kind,n)
   var BaseNew = 
     newProc(
       BaseNewName.postfix("*"),
       [Name],
       newStmtList(
+        
         newCall(
           newDotExpr("system".ident,"echo".ident),
           newLit("Base new called " & $BaseNewName)
@@ -410,33 +424,38 @@ proc class_def(header:NimNode,content:NimNode):auto=
         )
       )
     )
-  result = (typesection:
-    # newCommentStmtNode("TYPESECTION"),
+  result = (
     TypeSection, 
-    # newCommentStmtNode("INTERNAL"),
-    basenew: BaseNew,
-    # quote do:
-    #   proc getDefault[_:`Name`]():`Name`=
-    #     `r` = `BaseNew`()
-    # ,
-    # newCommentStmtNode("PRE"),
-    pre: Pre,
-    # newCommentStmtNode("MAIN"),
-    main: Main,
+    BaseNew,
+    Pre,
+    Main,
   )
-  hint astGenRepr quote do:
-    type X=ref object of RootObj
-      ## ASDAs
-      ## asdasd
-      x*:int
-      y*,z*:float
+  # dev_hint astGenRepr quote do:
+  #   type X=ref object of RootObj
+  #     ## ASDAs
+  #     ## asdasd
+  #     x*:int
+  #     y*,z*:float
   constructor_regs[$Name]=(typedef:TypeDef, baseconstr:BaseConstructor, constrs:Constrs)
-  hint astGenRepr result
-  hint repr result
-proc class_section(content:NimNode):auto=
-  result = newSeq[auto]()
+  # dev_hint astGenRepr result
+  # dev_hint repr result
+proc processSectionChunk(source:NimNode):tuple[header:NimNode,content:NimNode]=
+  var content = source.copy()
+  var header = source.copy()
+  if header.kind==nnkInfix:
+    if header.len>3:
+      header.del(3)
+    content = content[3]
+  
+  return (header: header, content: content)
+proc class_section(content: NimNode): TypeSectionResult =
+  result = @[]
   for c in content:
-    result.add class_def(c[0],c[1])
+    var g = processSectionChunk(c)
+    dev_hint astGenrepr g.header
+    dev_hint astGenrepr g.content
+    var v = class_def(g.header,g.content)
+    result.add v
     # clssection.add v[0]
     # for i in 1..<v.len:
     #   body.add v[i]
@@ -447,17 +466,18 @@ proc class_section(content:NimNode):auto=
   
 
 macro class*(header,content:untyped):untyped=
-  hint astGenRepr header
-  hint astGenRepr content
+  dev_hint astGenRepr header
+  dev_hint astGenRepr content
   result = newStmtList()
-  for k,v in class_def(header,content):
+  for k,v in class_def(header,content).fieldPairs:
     result.add newCommentStmtNode(k)
     result.add v
+  dev_hint repr result
   
 macro class*(content:untyped):untyped=
-  hint astGenRepr content
+  dev_hint astGenRepr content
   var
-    typeSection = nnkTypeSection
+    typeSection = nnkTypeSection.newTree()
     main = newStmtList()
   result = newStmtList(
     newCommentStmtNode("Types"),
@@ -466,18 +486,21 @@ macro class*(content:untyped):untyped=
     main)
   
   for v in class_section(content):
-    for k in v:
-      if k.kind == nnkTypeSection:
-        k[0].expectKind nnkTypeDef
-        typeSection.add(k[0])
-      else:
-        main.add(k)
+    for b in fields(v):
+      # dev_hint repr b
+      if b.kind == nnkTypeSection:
+        b[0].expectKind nnkTypeDef
+        typeSection.add(b[0])
+      main.add(b)
+  # dev_hint repr result
     
 
 when isMainModule:
   # TODO Concept for classes
   # TODO Object Variants for classes 
   # TODO test inheritance
+  class: C of RootObj:
+    var foo*:int
   class: 
     A* of RootObj:
       a=3
