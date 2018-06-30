@@ -445,18 +445,21 @@ proc processSectionChunk(source:NimNode):tuple[header:NimNode,content:NimNode]=
 proc class_section(content: NimNode): TypeSectionResult =
   result = @[]
   for c in content:
-    var g = processSectionChunk(c)
-    dev_hint astGenrepr g.header
-    dev_hint astGenrepr g.content
-    var v = class_def(g.header,g.content)
-    result.add v
-    # clssection.add v[0]
-    # for i in 1..<v.len:
-    #   body.add v[i]
-  # return newStmtList(
-  #   clssection,
-  #   body
-  # )
+    if c.kind == nnkTypeSection:
+      result.add((c,nil,nil,nil))
+    else:
+      var g = processSectionChunk(c)
+      dev_hint astGenrepr g.header
+      dev_hint astGenrepr g.content
+      var v = class_def(g.header,g.content)
+      result.add v
+      # clssection.add v[0]
+      # for i in 1..<v.len:
+      #   body.add v[i]
+    # return newStmtList(
+    #   clssection,
+    #   body
+    # )
   
 
 macro class*(header,content:untyped):untyped=
@@ -482,10 +485,11 @@ macro class*(content:untyped):untyped=
   for v in class_section(content):
     for b in fields(v):
       # dev_hint repr b
-      if b.kind == nnkTypeSection:
-        b[0].expectKind nnkTypeDef
-        typeSection.add(b[0])
-      main.add(b)
+      if b!=nil:
+        if b.kind == nnkTypeSection:
+          b[0].expectKind nnkTypeDef
+          typeSection.add(b[0])
+        main.add(b)
   # dev_hint repr result
     
 
@@ -493,23 +497,26 @@ when isMainModule:
   # TODO Concept for classes
   # TODO Object Variants for classes 
   # TODO test inheritance
+  # TODO typesection in class section
   class: C of RootObj:
-    var foo*:int
+    var foo* : int
   class: 
+    type I = float
     A* of RootObj:
       var
-        a=3
-        c*=5
-        x,y,u:int
-      proc init*(bbdfgdfg:int)=
+        asdasd: I
+        a = 3
+        c* = 5
+        x,y,u : int
+      proc init*(bbdfgdfg: int) =
         echo bbdfgdfg
-      proc init*()=discard
+      proc init*() = discard
         ## Hello!!!
     B* of A:
       var 
-        a=1321
-        other:A
+        a = 1321
+        other : A
   var b = newA(1231231)
   echo b.a
-  echo newB().a==1321
+  echo newB().a == 1321
 
