@@ -215,8 +215,7 @@ proc sharesNames(n,b:NimNode):bool=
       var kb = b[bi]
       if ka==kb: return true
   return false
-proc class_def(header:NimNode,content:NimNode
-):NimNode=
+proc class_def(header:NimNode,content:NimNode):auto=
   hint astGenRepr header
   hint astGenRepr content
   #NOTE postfix export designation `*` doesn't work yet
@@ -411,19 +410,19 @@ proc class_def(header:NimNode,content:NimNode
         )
       )
     )
-  result = newStmtList(
-    newCommentStmtNode("TYPESECTION"),
+  result = (typesection:
+    # newCommentStmtNode("TYPESECTION"),
     TypeSection, 
-    newCommentStmtNode("INTERNAL"),
-    BaseNew,
+    # newCommentStmtNode("INTERNAL"),
+    basenew: BaseNew,
     # quote do:
     #   proc getDefault[_:`Name`]():`Name`=
     #     `r` = `BaseNew`()
     # ,
-    newCommentStmtNode("PRE"),
-    Pre,
-    newCommentStmtNode("MAIN"),
-    Main,
+    # newCommentStmtNode("PRE"),
+    pre: Pre,
+    # newCommentStmtNode("MAIN"),
+    main: Main,
   )
   hint astGenRepr quote do:
     type X=ref object of RootObj
@@ -434,28 +433,65 @@ proc class_def(header:NimNode,content:NimNode
   constructor_regs[$Name]=(typedef:TypeDef, baseconstr:BaseConstructor, constrs:Constrs)
   hint astGenRepr result
   hint repr result
-
+proc class_section(content:NimNode):auto=
+  result = newSeq[auto]()
+  for c in content:
+    result.add class_def(c[0],c[1])
+    # clssection.add v[0]
+    # for i in 1..<v.len:
+    #   body.add v[i]
+  # return newStmtList(
+  #   clssection,
+  #   body
+  # )
+  
 
 macro class*(header,content:untyped):untyped=
   hint astGenRepr header
   hint astGenRepr content
-  return class_def(header,content)
+  result = newStmtList()
+  for k,v in class_def(header,content):
+    result.add newCommentStmtNode(k)
+    result.add v
+  
+macro class*(content:untyped):untyped=
+  hint astGenRepr content
+  var
+    typeSection = nnkTypeSection
+    main = newStmtList()
+  result = newStmtList(
+    newCommentStmtNode("Types"),
+    typeSection,
+    newCommentStmtNode("Body"),
+    main)
+  
+  for v in class_section(content):
+    for k in v:
+      if k.kind == nnkTypeSection:
+        k[0].expectKind nnkTypeDef
+        typeSection.add(k[0])
+      else:
+        main.add(k)
+    
 
-# TODO Concept for classes
-# TODO Object Variants for classes 
-# TODO test inheritance
-class A* of RootObj:
-  a=3
-  c*=5
-  var 
-    x,y,u:int
-  proc init*(bbdfgdfg:int)=
-    echo bbdfgdfg
-  proc init*()=discard
-    ## Hello!!!
-class B* of A:
-  a=1321
-var b = newA(1231231)
-echo b.a
-echo newB().a==1321
+when isMainModule:
+  # TODO Concept for classes
+  # TODO Object Variants for classes 
+  # TODO test inheritance
+  class: 
+    A* of RootObj:
+      a=3
+      c*=5
+      var 
+        x,y,u:int
+      proc init*(bbdfgdfg:int)=
+        echo bbdfgdfg
+      proc init*()=discard
+        ## Hello!!!
+    B* of A:
+      a=1321
+      other:A
+  var b = newA(1231231)
+  echo b.a
+  echo newB().a==1321
 
