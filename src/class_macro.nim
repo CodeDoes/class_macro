@@ -386,12 +386,6 @@ proc class_def(header:NimNode,content:NimNode):TypeDefResult=
 
       # NewVar()
       # content.insert(0,nnkVarSection(newIdentDefs(n[1],n[2])))
-    of nnkCall: # f : t
-      n[1].expectLen 1
-      NewVar newIdentDefs(n[0],n[1][0],newEmptyNode())
-    of nnkAsgn: # f = v
-      #TODO tuple unpacking assignment
-      NewVar newIdentDefs(n[0],newEmptyNode(),n[1])
     of nnkVarSection:
       for c in n: # var f,g,h : t = v
         NewVar c
@@ -503,17 +497,18 @@ when isMainModule:
     var foo*:int
   class: 
     A* of RootObj:
-      a=3
-      c*=5
-      var 
+      var
+        a=3
+        c*=5
         x,y,u:int
       proc init*(bbdfgdfg:int)=
         echo bbdfgdfg
       proc init*()=discard
         ## Hello!!!
     B* of A:
-      a=1321
-      other:A
+      var 
+        a=1321
+        other:A
   var b = newA(1231231)
   echo b.a
   echo newB().a==1321
