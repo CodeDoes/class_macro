@@ -1,0 +1,461 @@
+
+import macros,sequtils,tables#,hashes,future,strutils
+# import macros
+using 
+  node*:NimNode
+  value*:NimNode
+proc return_param*(node): NimNode {.compileTime.}=
+  node.expectKind {nnkFormalParams,nnkProcDef}
+  case node.kind
+  of nnkFormalParams:
+    return node[0]
+  of nnkProcDef:
+    return node.params.return_param
+  else:
+    discard
+
+proc identdefs_names*(node): seq[NimNode] {.compileTime.}=
+  node.expectKind nnkIdentDefs
+  result = newSeq[NimNode]()
+  for c in 0..node.len-3:
+    if node[c].kind == nnkPostfix:
+      result.add(node[c][1])
+    else:
+      result.add(node[c])
+
+proc identdefs_name*(node): NimNode {.compileTime.}=
+  node.expectKind nnkIdentDefs
+  result = node[node.len-3]
+  if result.kind == nnkPostfix:
+    result = result[1]
+proc identdefs_type*(node): NimNode {.compileTime.}=
+  node.expectKind nnkIdentDefs
+  result = node[node.len-2]
+proc identdefs_default*(node): NimNode {.compileTime.}=
+  node.expectKind nnkIdentDefs
+  result = node[node.len-1]
+proc generic_params*(node):NimNode{.compileTime.}=
+  node.expectKind nnkProcDef
+  return node[2]
+
+proc `identdefs_type=`*(node,value) {.compileTime.}=
+  node.expectKind nnkIdentDefs
+  node[node.len-2]=value
+proc `identdefs_name=`*(node,value) {.compileTime.}=
+  node.expectKind nnkIdentDefs
+  if node[node.len-3].kind==nnkPostfix:
+    node[node.len-3][1]=value
+  else:
+    node[node.len-3]=value
+
+proc `identdefs_default=`*(node,value) {.compileTime.}=
+  node.expectKind nnkIdentDefs
+  node[node.len-1]=value
+proc `return_param=`*(node,value) {.compileTime.}=
+  node.expectKind {nnkFormalParams,nnkProcDef}
+  value.expectKind nnkIdentDefs
+  case node.kind
+  of nnkFormalParams:
+    node[0]=value
+  of nnkProcDef:
+    node.params.return_param=value
+  else:
+    discard
+proc `generic_params=`*(node,value){.compileTime.}=
+  node.expectKind nnkProcDef
+  value.expectKind nnkGenericParams
+  node[2]=value
+proc walk(self:NimNode,kind:NimNodeKind):NimNode=
+  var
+    cs = @[@[self]]
+  while cs.len>0:
+    for c in pop(cs):
+      if c.kind == kind:
+        return c
+      cs.add(toSeq(c.children))
+proc contains(self:NimNode,value:NimNode):bool=
+  result= false
+  for n in self:
+    if n==value:
+      return true
+proc remove(frm:NimNode,val:any)=
+  frm.del(frm.find(val))
+proc generateConstructor(
+    InitProc:NimNode,
+    BaseNewCall:NimNode,
+    ):tuple[
+      head:NimNode,
+      constr:NimNode,
+      init:NimNode]=
+  # hint astGenRepr InitProc
+  var T = InitProc.params[1].identdefs_type
+  T.expectKind {nnkIdent}
+  InitProc.expectKind nnkProcDef
+  
+  var ProcHead=InitProc.copy()
+  ProcHead.body= newEmptyNode()
+  var r = "result".ident
+  var init_call = newCall(newDotExpr(r,InitProc.name,))
+  var Constr=newProc(
+    newIdentNode("new"& $T),
+    [ T ],
+    newStmtList(
+      newAssignment(
+        "result".ident,
+        BaseNewCall
+      )
+    )
+  )
+  if InitProc.kind==nnkPostfix:
+    Constr.name=Constr.name.postfix("*")
+  if InitProc[0].kind==nnkPostfix:
+    Constr.name = Constr.name.postfix("*")
+  
+  InitProc.return_param.expectKind nnkEmpty
+  InitProc.params.expectMinLen 2
+  for i in 2..<InitProc.params.len:
+    var p = InitProc.params[i]
+    Constr.params.add p
+    init_call.add p.identdefs_name
+  Constr.body.add init_call
+  
+  result = (
+    head: ProcHead,
+    constr: Constr,
+    init: InitProc
+  )
+  # hint repr result
+macro gen_constructor*(stmt_list:untyped):untyped=
+  var InitProc = stmt_list
+  stmt_list.expectKind {nnkStmtList, nnkProcDef}
+  if stmt_list.kind==nnkStmtList:
+    stmt_list.expectLen 1
+    InitProc = stmt_list[0]
+  InitProc.params.expectMinLen 1
+  var 
+    t=generateConstructor(
+      InitProc, 
+      newCall(
+        "new".ident, 
+        newCall(
+          "type".ident, 
+          "result".ident) 
+      )
+    )
+  result = newStmtList(t.head,t.constr,t.init)
+proc processClassHeader(header:NimNode
+):tuple[name,root:NimNode,exported:bool]=
+  var 
+    name=header
+    root="RootObj".ident
+    exported=false
+  if header.kind == nnkInfix:
+    if $header[0]=="*":
+      assert $header[2][0]=="of"
+      name = header[1]
+      root = header[2][1]
+      exported = true
+    elif $header[0]=="of":
+      name = header[1]
+      root = header[2]
+      exported= exported
+    else:
+      error("wrong infix expr", header)
+  else:
+    exported = true
+  return (
+    name: name, 
+    root: root, 
+    exported: exported )
+proc objectTy(node:NimNode):NimNode=
+  node.expectKind nnkTypeDef
+  result = node[2]
+  if result.kind == nnkRefTy:
+    result = result[0]
+  result.expectKind nnkObjectTy
+
+proc reclist(node:NimNode):NimNode=
+  result = node.objectTy[2]
+proc typeDefRoot(node:NimNode):NimNode=
+  result = node.objectTy[1][0]
+
+  
+var constructor_regs {.compileTime.} = newTable[
+  string,
+  tuple[
+    typedef: NimNode, 
+    baseconstr:NimNode, 
+    constrs: seq[tuple[
+      head, constr, init: NimNode]]]
+]()
+
+proc getInheritedReclist(key:string):NimNode=
+  var base = constructor_regs[key]
+  result = base.typedef.reclist
+  if constructor_regs.contains($base.typedef.typedefRoot):
+    for m in getInheritedReclist($base.typedef.typedefRoot):
+      result.add(m)
+
+# proc addToConstructorReg(key,val:NimNode)=
+#   for c in constructor_regs:
+#     c.expectKind nnkStmtList
+#     if c[0]==key:
+#       c.add(val)
+#       return
+#   error("Constructor is not registerered")
+proc sharesNames(n,b:NimNode):bool=
+  var a = n
+  if a.kind == nnkIdent:
+    a = newIdentDefs(a,newEmptyNode())
+  a.expectKind nnkIdentDefs
+  b.expectKind nnkIdentDefs
+  for ai in 0 ..< a.len-2:
+    var ka = a[ai]
+    for bi in 0 ..< b.len-2:
+      var kb = b[bi]
+      if ka==kb: return true
+  return false
+proc class_def(header:NimNode,content:NimNode
+):NimNode=
+  hint astGenRepr header
+  hint astGenRepr content
+  #NOTE postfix export designation `*` doesn't work yet
+  var
+    Name,Root:NimNode
+    exported:bool
+  # echo repr processClassHeader(header)
+  (Name,Root,exported) = processClassHeader(header)
+  # hint astGenRepr Name
+  # hint astGenRepr Root
+  
+  var
+    Main            = newStmtList()
+    Pre             = newStmtList()
+    This            = "self"
+    RecList         = newNimNode(nnkRecList)
+    BaseNewName     = ("basenew_"& $Name).ident
+    BaseNewCall     = newCall(BaseNewName)
+    TypeDef         = 
+      nnkTypeDef.newTree(
+        nnkPragmaExpr.newTree(
+          Name.postfix("*"),
+          nnkPragma.newTree(
+            "inject".ident
+          )
+        ),
+        newEmptyNode(),
+        nnkRefTy.newTree(
+          nnkObjectTy.newTree(
+            newEmptyNode(),
+            nnkOfInherit.newTree(Root),
+            RecList
+          )
+        )
+      )
+    TypeSection     = nnkTypeSection.newTree(TypeDef)
+    Constrs           = newSeq[tuple[head, constr, init: NimNode]]()
+
+    inherits_class  = constructor_regs.contains($Root)
+    inheritReclist  = 
+      if constructor_regs.contains($Root): 
+        getInheritedReclist($Root) 
+      else: 
+        nnkRecList.newTree()
+    BaseConstructor     = 
+      if inherits_class: 
+        constructor_regs[$Root].baseconstr.copy()
+      else: 
+        nnkObjConstr.newTree(newEmptyNode())
+  BaseConstructor[0] = Name
+  if inherits_class:
+    for i_constr in constructor_regs[$Root].constrs:
+      var n_constr = i_constr.init.copy()
+      n_constr.params[1].identDefs_type=Name
+      n_constr.params[0]=newEmptyNode()
+      var gen = generateConstructor(n_constr,BaseNewCall)
+      Pre.add gen.head
+      Main.add gen.constr
+      gen.constr.addPragma("inject".ident)
+      Main.add gen.init
+      Constrs.add (head: gen.head, constr: gen.constr, init: gen.init)
+
+  # hint astGenRepr Root.base()#.getTypeImpl()
+  # BaseConstructor.add(newColonExpr(n.identdefs_name,n.identdefs_default))
+  # BaseNew.addPragma("inject".ident)
+  proc NewVar(n:NimNode)=
+    # hint astGenRepr n
+    var v = n.copy()
+    v.expectKind nnkIdentDefs
+    v.expectMinLen 3
+    if v.identdefs_default.kind!=nnkEmpty:
+      var d=v.identdefs_default
+      v.identdefs_default=newEmptyNode()
+      if v.identdefs_type.kind == nnkEmpty:
+        v.identdefs_type=nnkTypeOfExpr.newTree(d)
+      #Check if in inherited constructor:
+      for i in 1 ..< BaseConstructor.len:
+        var c = BaseConstructor[i]
+        hint astGenRepr c[0]
+        hint astGenRepr v.identdefs_name
+        hint $($c[0] == $v.identdefs_name)
+        if $c[0] == $v.identdefs_name:
+          v.expectLen 3
+          # Is already in inherited base constructor, overwrite
+          BaseConstructor.del(i)
+          break
+      # Is a new constructor argument
+      BaseConstructor.add(
+        newColonExpr(
+          v.identdefs_name,
+          d))
+    #Check if in inherited reclist
+    for i,m in inheritReclist:
+      m.expectKind nnkIdentDefs
+      if sharesNames(m,v):
+        return
+    RecList.add(v)
+  proc InjectThisParam(n:NimNode)=
+    # inject `This: T` into the arguments
+    n.expectKind RoutineNodes
+    n.params.expectMinLen 1
+    if n.params.kind != nnkFormalParams:
+      n.params = newNimNode nnkFormalParams
+    if( n.params.len >= 2 and 
+        $n.params[1].identdefs_name == This ):
+      doAssert(
+        (n.params[1].identdefs_type.kind == nnkEmpty or
+        n.params[1].identdefs_type == Name),
+        "`self` type doesn't match containing `class`\n" & $n.params[1] & "\n" & $Name
+      )
+      n.params.del(1)
+    n.params.insert(1, newIdentDefs(This.ident, Name))
+  proc NewThisPragma(n:NimNode)=
+    # hint astGenRepr n 
+    n.expectLen(1)
+    n[0].expectKind(nnkExprColonExpr)
+    if not($n[0][0] == "this"):
+      error("Only `this` pragma is allowed in class body." & $n[0][0], n[0][0])
+    n[0][1].expectKind(nnkIdent)
+    Main.add n
+    This = $n[0][1]
+  proc NewRoutine(n:NimNode)=
+    if n.pragma.kind==nnkEmpty:
+      n.pragma=newNimNode(nnkPragma)
+    if n.kind == nnkMethodDef:
+      if not n.pragma.contains("base".ident):
+        n.pragma.add "base".ident
+    n.addPragma("inject".ident)
+    if n.name == "init".ident:
+      var gen = generateConstructor(n, BaseNewCall)
+      for i_init in Constrs:
+        if i_init.head==gen.head or i_init.head.params==gen.head.params:
+          Pre.remove(i_init[0])
+          Main.remove(i_init[1])
+          Main.remove(i_init[2])
+      Constrs.add (head: gen.head, constr: gen.constr, init: gen.init)
+      Pre.add gen.head
+      gen.constr.addPragma("inject".ident)
+      Main.add gen.constr
+    n.pragma = newEmptyNode()
+    Main.add n
+  
+  for n in content.copy():
+    case n.kind
+    of nnkInfix:
+      n.expectLen 3
+      hint astGenRepr n
+      case $n[0]
+      of "*=":
+        NewVar newIdentDefs(n[1],newEmptyNode(),n[2])
+      of "*:":
+        NewVar newIdentDefs(n[1],n[2]) 
+      else:
+        error("invalid class body infix node " & $n.kind,n)
+
+      # NewVar()
+      # content.insert(0,nnkVarSection(newIdentDefs(n[1],n[2])))
+    of nnkCall: # f : t
+      n[1].expectLen 1
+      NewVar newIdentDefs(n[0],n[1][0],newEmptyNode())
+    of nnkAsgn: # f = v
+      #TODO tuple unpacking assignment
+      NewVar newIdentDefs(n[0],newEmptyNode(),n[1])
+    of nnkVarSection:
+      for c in n: # var f,g,h : t = v
+        NewVar c
+    of nnkPragma:
+      NewThisPragma n
+    of nnkMethodDef, nnkProcDef:
+      InjectThisParam n
+      NewRoutine n
+    of nnkIteratorDef, nnkConverterDef, nnkMacroDef, nnkTemplateDef:
+      InjectThisParam n
+      Pre.add n
+    of nnkDiscardStmt: # Valid
+      Main.add nnkDiscardStmt.newTree(newEmptyNode())
+    else:
+      hint astGenRepr n
+      error("invalid class body node " & $n.kind,n)
+  var BaseNew = 
+    newProc(
+      BaseNewName.postfix("*"),
+      [Name],
+      newStmtList(
+        newCall(
+          newDotExpr("system".ident,"echo".ident),
+          newLit("Base new called " & $BaseNewName)
+        ),
+        newAssignment(
+          "result".ident,
+          BaseConstructor
+        )
+      )
+    )
+  result = newStmtList(
+    newCommentStmtNode("TYPESECTION"),
+    TypeSection, 
+    newCommentStmtNode("INTERNAL"),
+    BaseNew,
+    # quote do:
+    #   proc getDefault[_:`Name`]():`Name`=
+    #     `r` = `BaseNew`()
+    # ,
+    newCommentStmtNode("PRE"),
+    Pre,
+    newCommentStmtNode("MAIN"),
+    Main,
+  )
+  hint astGenRepr quote do:
+    type X=ref object of RootObj
+      ## ASDAs
+      ## asdasd
+      x*:int
+      y*,z*:float
+  constructor_regs[$Name]=(typedef:TypeDef, baseconstr:BaseConstructor, constrs:Constrs)
+  hint astGenRepr result
+  hint repr result
+
+
+macro class*(header,content:untyped):untyped=
+  hint astGenRepr header
+  hint astGenRepr content
+  return class_def(header,content)
+
+# TODO Concept for classes
+# TODO Object Variants for classes 
+# TODO test inheritance
+class A* of RootObj:
+  a=3
+  c*=5
+  var 
+    x,y,u:int
+  proc init*(bbdfgdfg:int)=
+    echo bbdfgdfg
+  proc init*()=discard
+    ## Hello!!!
+class B* of A:
+  a=1321
+var b = newA(1231231)
+echo b.a
+echo newB().a==1321
+
