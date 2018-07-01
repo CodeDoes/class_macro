@@ -413,19 +413,6 @@ proc class_def(header:NimNode,content:NimNode):TypeDefResult=
   
   for n in content.copy():
     case n.kind
-    of nnkInfix:
-      n.expectLen 3
-      dev_hint astGenRepr n
-      case $n[0]
-      of "*=":
-        NewVar newIdentDefs(n[1],newEmptyNode(),n[2])
-      of "*:":
-        NewVar newIdentDefs(n[1],n[2]) 
-      else:
-        error("invalid class body infix node " & $n.kind,n)
-
-      # NewVar()
-      # content.insert(0,nnkVarSection(newIdentDefs(n[1],n[2])))
     of nnkVarSection:
       for c in n: # var f,g,h : t = v
         NewVar c
