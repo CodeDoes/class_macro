@@ -445,7 +445,7 @@ proc processSectionChunk(source:NimNode):tuple[header:NimNode,content:NimNode]=
 proc class_section(content: NimNode): TypeSectionResult =
   result = @[]
   for c in content:
-    if c.kind == nnkTypeSection:
+    if c.kind in {nnkPragma,nnkTypeSection}:
       result.add((c,nil,nil,nil))
     else:
       var g = processSectionChunk(c)
@@ -461,7 +461,10 @@ proc class_section(content: NimNode): TypeSectionResult =
     #   body
     # )
   
-
+proc newPragma(content:varargs[NimNode]):NimNode=
+  return nnkPragma.newTree(content)
+proc newPragma(content:string):NimNode=
+  return newPragma(content.ident)
 macro class*(header,content:untyped):untyped=
   dev_hint astGenRepr header
   dev_hint astGenRepr content
@@ -477,12 +480,22 @@ macro class*(content:untyped):untyped=
     typeSection = nnkTypeSection.newTree()
     main = newStmtList()
   result = newStmtList(
+    newPragma("push"),
+    nnkPragma.newTree(
+      nnkExprColonExpr.newTree(
+        newIdentNode("this"),
+        newIdentNode("self")
+      )
+    ),
     newCommentStmtNode("Types"),
     typeSection,
     newCommentStmtNode("Body"),
-    main)
+    main,
+    newPragma("pop"),
+    )
   
   for v in class_section(content):
+    main.add("push".newPragma)
     for b in fields(v):
       # dev_hint repr b
       if b!=nil:
@@ -490,6 +503,7 @@ macro class*(content:untyped):untyped=
           b[0].expectKind nnkTypeDef
           typeSection.add(b[0])
         main.add(b)
+    main.add("pop".newPragma)
   # dev_hint repr result
     
 
@@ -502,6 +516,8 @@ when isMainModule:
     var foo* : int
   class: 
     type I = float
+    {.this: self.}
+    
     A* of RootObj:
       var
         asdasd: I
