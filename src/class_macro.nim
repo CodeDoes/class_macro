@@ -266,12 +266,13 @@ proc class_def(header:NimNode,content:NimNode):TypeDefResult=
     BaseNewCall     = newCall(BaseNewName)
     TypeDef         = 
       nnkTypeDef.newTree(
-        nnkPragmaExpr.newTree(
-          Name.postfix("*"),
-          nnkPragma.newTree(
-            "inject".ident
-          )
-        ),
+        Name.postfix("*"),
+        # nnkPragmaExpr.newTree(
+        #   Name.postfix("*"),
+        #   nnkPragma.newTree(
+        #     "inject".ident
+        #   )
+        # ),
         newEmptyNode(),
         nnkRefTy.newTree(
           nnkObjectTy.newTree(
@@ -305,7 +306,7 @@ proc class_def(header:NimNode,content:NimNode):TypeDefResult=
       var head = createProcHead(n_init)
       Pre.add head
       Main.add gen
-      gen.addPragma("inject".ident)
+      # gen.addPragma("inject".ident)
       Main.add n_init
       Constrs.add (
         head: head, 
@@ -375,10 +376,12 @@ proc class_def(header:NimNode,content:NimNode):TypeDefResult=
   proc NewRoutine(n:NimNode)=
     if n.pragma.kind==nnkEmpty:
       n.pragma=newNimNode(nnkPragma)
-    if n.kind == nnkMethodDef:
-      if not n.pragma.contains("base".ident):
-        n.pragma.add "base".ident
-    n.addPragma("inject".ident)
+    # NOTE can't accurately detect base methods yet.
+    # if n.kind == nnkMethodDef:
+    #   if not n.pragma.contains("base".ident):
+    #     n.pragma.add "base".ident
+    # NOTE removing inject pragmas
+    # n.addPragma("inject".ident)
     var head = createProcHead(n)
     Pre.add head
     if n.name == "init".ident:
@@ -403,7 +406,7 @@ proc class_def(header:NimNode,content:NimNode):TypeDefResult=
         constr: gen,
         init: n
         )
-      gen.addPragma("inject".ident)
+      # gen.addPragma("inject".ident)
       Main.add gen
     n.pragma = newEmptyNode()
     Main.add n
@@ -517,6 +520,7 @@ macro class*(content:untyped):typed=
     typeSection = nnkTypeSection.newTree()
     main = newStmtList()
   result = newStmtList(
+    newCommentStmtNode("[START GENERATED CODE]"),
     newPragma("push"),
     # nnkPragma.newTree(
     #   nnkExprColonExpr.newTree(
@@ -524,17 +528,18 @@ macro class*(content:untyped):typed=
     #     newIdentNode("self")
     #   )
     # ),
-    newCommentStmtNode("Types"),
+    newCommentStmtNode("# Types"),
     typeSection,
-    newCommentStmtNode("Body"),
+    newCommentStmtNode("# Routines"),
     main,
     newPragma("pop"),
+    newCommentStmtNode("[END GENERATED CODE]"),
     )
   
   for v in class_section(content):
     main.add("push".newPragma)
     main.add(newCommentStmtNode(
-      "# " & $v.typesection[0].typeDefIdent))
+      "## " & $v.typesection[0].typeDefIdent))
     for k,b in fieldPairs(v):
       # dev_hint repr b
       if b!=nil:
@@ -543,10 +548,10 @@ macro class*(content:untyped):typed=
           typeSection.add(b[0])
         else:
           main.add(newCommentStmtNode(
-            $v.typesection[0].typeDefIdent & " " & k))
+            "### " & $v.typesection[0].typeDefIdent & " " & k))
           main.add(b)
     main.add("pop".newPragma)
-  hint astgenrepr result
+  # hint astgenrepr result
   # hint repr result
   dev_hint repr result
 
@@ -569,13 +574,20 @@ when isMainModule:
       proc init*(bbdfgdfg: int) =
         echo bbdfgdfg
       proc init*() = discard
+      method m*(){.base.}=
+        echo "a"
+        discard
         ## Hello!!!
     B* of A:
+      method m*()=
+        echo "b"
+        discard
       var 
         a = 1321
         other : A
       proc init*()= discard
-  var b = newA(1231231)
-  echo b.a
-  echo newB().a == 1321
-
+  var a = newA(1231231)
+  echo a.a
+  var b = newB()
+  echo b.a == 1321
+  b.m()
