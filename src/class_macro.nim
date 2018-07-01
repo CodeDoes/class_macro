@@ -216,7 +216,7 @@ proc sharesNames(n,b:NimNode):bool=
 type 
   TypeDefResult = tuple[
     typesection,
-    basenew,
+    # basenew,
     pre,
     main:NimNode]
   TypeSectionResult = seq[TypeDefResult]
@@ -292,7 +292,6 @@ proc class_def(header:NimNode,content:NimNode):TypeDefResult=
     baseconstr:BaseConstructor, 
     constrs:local_constr_reg
     )
-  
   BaseConstructor[0] = Name
 
   # dev_hint astGenRepr Root.base()#.getTypeImpl()
@@ -415,9 +414,10 @@ proc class_def(header:NimNode,content:NimNode):TypeDefResult=
   for c in local_constr_reg:
     c.name = ("new" & $Name).ident
     Main.insert 0,c
+  Main.insert 0,BaseNew
   result = (
     typesection: TypeSection, 
-    basenew: BaseNew,
+    # basenew: BaseNew,
     pre: Pre,
     main: Main,
   )
@@ -435,8 +435,12 @@ proc processSectionChunk(source:NimNode):tuple[header:NimNode,content:NimNode]=
 proc class_section(content: NimNode): TypeSectionResult =
   result = @[]
   for c in content:
-    if c.kind in {nnkPragma,nnkTypeSection}:
-      result.add((c,nil,nil,nil))
+    if c.kind in {nnkTypeSection}:
+      dev_hint astGenRepr c
+      result.add((c,nil,nil))
+    elif c.kind in {nnkPragma}:
+      dev_hint astGenRepr c
+      result.add((nil,nil,c))
     else:
       var g = processSectionChunk(c)
       dev_hint astGenrepr g.header
@@ -473,7 +477,7 @@ macro class*(content:untyped):typed=
   
   result = newStmtList(
     newCommentStmtNode("[START GENERATED CODE]"),
-    newPragma("push"),
+    # newPragma("push"),
     # nnkPragma.newTree(
     #   nnkExprColonExpr.newTree(
     #     newIdentNode("this"),
@@ -487,23 +491,29 @@ macro class*(content:untyped):typed=
     pre,
     newCommentStmtNode("## Main"),
     main,
-    newPragma("pop"),
+    # newPragma("pop"),
     newCommentStmtNode("[END GENERATED CODE]"),
     )
   for v in class_section(content):
 
     # main.add(newCommentStmtNode("## " & $v.typesection[0].typeDefIdent))
-    for t in v.typesection:
-      typeSection.add t
+    var v_name = "..."
+    if v.typeSection!=nil:
+      v.typeSection.expectLen 1
+
+      v_name = $v.typesection[0].typeDefIdent
+      typeSection.add v.typesection[0]
     if v.pre!=nil or v.main!=nil:
       main.add("push".newPragma)
 
       if v.pre!=nil:
-        pre.add newCommentStmtNode("### Pre " & $v.typesection[0].typeDefIdent)
+        pre.add newCommentStmtNode(
+          "### Pre " & v_name)
         pre.add v.pre
       if v.main!=nil:
-        main.add newCommentStmtNode("### Main " & $v.typesection[0].typeDefIdent)
-        main.add v.basenew
+        main.add newCommentStmtNode(
+          "### Main " & v_name)
+        # main.add v.basenew
         main.add v.main
 
       main.add("pop".newPragma)
@@ -519,6 +529,7 @@ when isMainModule:
     C of RootObj:
       var foo* : int
   class: 
+    {.this:self.}
     type I = float
     
     A* of RootObj:
