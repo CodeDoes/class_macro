@@ -136,25 +136,6 @@ proc generateConstructor(
   #   init: InitProc
   # )
   # dev_hint repr result
-macro gen_constructor*(stmt_list:untyped):untyped=
-  var InitProc = stmt_list
-  stmt_list.expectKind {nnkStmtList, nnkProcDef}
-  if stmt_list.kind==nnkStmtList:
-    stmt_list.expectLen 1
-    InitProc = stmt_list[0]
-  InitProc.params.expectMinLen 1
-  var 
-    gen=generateConstructor(
-      InitProc, 
-      newCall(
-        "new".ident, 
-        newCall(
-          "type".ident, 
-          "result".ident) 
-      )
-    )
-
-  result = newStmtList(createProcHead(InitProc),gen,InitProc)
 proc processClassHeader(header:NimNode):tuple[name,root:NimNode,exported:bool]=
   var 
     name=header
