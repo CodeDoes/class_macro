@@ -1,4 +1,4 @@
-
+# TODO class routines are not exported
 import macros,sequtils,tables#,hashes,future,strutils
 # import macros
 using 
@@ -360,7 +360,7 @@ proc class_def(header:NimNode,content:NimNode):TypeDefResult=
     Pre.add head
     if n.name == "init".ident:
       var n_constr = generateConstructor(n, BaseNewCall)
-      hint astGenrepr head
+      dev_hint astGenrepr head
       local_constr_reg.add(n_constr)
     if head!=n:
       Main.add n
@@ -416,8 +416,7 @@ proc class_def(header:NimNode,content:NimNode):TypeDefResult=
     Main.insert 0,c
   Main.insert 0,BaseNew
   result = (
-    typesection: TypeSection, 
-    # basenew: BaseNew,
+    typesection: TypeSection,
     pre: Pre,
     main: Main,
   )
